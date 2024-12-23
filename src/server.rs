@@ -36,6 +36,7 @@ impl Client {
             let payload = message.encode_to_vec();
             self.stream.write_all(&payload)?;
             self.stream.flush()?;
+            info!("Sent echo back to client.");
         } else {
             error!("Failed to decode message");
         }
@@ -62,7 +63,7 @@ impl Server {
 
     /// Runs the server, listening for incoming connections and handling them
     pub fn run(&self) -> io::Result<()> {
-        self.is_running.store(true, Ordering::SeqCst); // Set the server as running
+        self.is_running.store(true, Ordering::SeqCst);
         info!("Server is running on {}", self.listener.local_addr()?);
 
         // Set the listener to non-blocking mode
@@ -73,14 +74,17 @@ impl Server {
                 Ok((stream, addr)) => {
                     info!("New client connected: {}", addr);
 
-                    // Handle the client request
-                    let mut client = Client::new(stream);
-                    while self.is_running.load(Ordering::SeqCst) {
-                        if let Err(e) = client.handle() {
-                            error!("Error handling client: {}", e);
-                            break;
+                    // Spawn a new thread to handle the client
+                    let is_running = Arc::clone(&self.is_running);
+                    thread::spawn(move || {
+                        let mut client = Client::new(stream);
+                        while is_running.load(Ordering::SeqCst) {
+                            if let Err(e) = client.handle() {
+                                error!("Error handling client: {}", e);
+                                break;
+                            }
                         }
-                    }
+                    });
                 }
                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                     // No incoming connections, sleep briefly to reduce CPU usage
